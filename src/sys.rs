@@ -1,11 +1,12 @@
 
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
+#![allow(non_snake_case)]
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
 
 use std::ffi::CStr;
-use std::os::raw::{c_int, c_char, c_void};
+use std::os::raw::{c_int, c_void};
 
 
 pub const MOSQ_ERR_CONN_PENDING:i32 = -1;

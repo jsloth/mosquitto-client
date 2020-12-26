@@ -618,10 +618,8 @@ static mut PASSWORD_SIZE: usize = 0;
 use std::ptr;
 
 unsafe extern "C" fn mosq_password_callback(buf: *mut c_char, _size: c_int, _rwflag: c_int, _userdata: *mut Data)->c_int {
-    unsafe {
-        ptr::copy(PASSWORD_PTR, buf, PASSWORD_SIZE+1);
-        PASSWORD_SIZE as c_int
-    }
+    ptr::copy(PASSWORD_PTR, buf, PASSWORD_SIZE+1);
+    PASSWORD_SIZE as c_int
 }
 
 // mosquitto is thread-safe, so let's tell Rust about it
@@ -696,7 +694,7 @@ impl <'a,T> Callbacks<'a,T> {
     fn initialize(&mut self) {
         if ! self.init {
             self.init = true;
-            let mut pdata: *const Callbacks<T> = &*self;
+            let pdata: *const Callbacks<T> = &*self;
             unsafe {
                 mosquitto_user_data_set(self.mosq.mosq, pdata as *mut Data);
             };
@@ -775,7 +773,7 @@ impl <'a,T>Drop for Callbacks<'a,T> {
 macro_rules! callback_ref {
     ($data:expr,$T:ident) =>
     {
-        unsafe {&mut *($data as *mut Callbacks<$T>)}
+        &mut *($data as *mut Callbacks<$T>)
     }
 }
 
@@ -804,7 +802,7 @@ unsafe extern "C" fn mosq_message_callback<T>(_: *mut Mosq, data: *mut Data, mes
     }
 }
 
-unsafe extern "C" fn mosq_subscribe_callback<T>(_: *mut Mosq, data: *mut Data, rc: c_int, qos_count: i32, granted_qos: *const c_int) {
+unsafe extern "C" fn mosq_subscribe_callback<T>(_: *mut Mosq, data: *mut Data, rc: c_int, _qos_count: i32, _granted_qos: *const c_int) {
     if data.is_null() { return; }
     let this = callback_ref!(data,T);
     if let Some(ref callback) = this.subscribe_callback {
@@ -831,7 +829,7 @@ unsafe extern "C" fn mosq_disconnect_callback<T>(_: *mut Mosq, data: *mut Data, 
 unsafe extern "C" fn mosq_log_callback<T>(_: *mut Mosq, data: *mut Data, level: c_int, text: *const c_char) {
     if data.is_null() { return; }
     let this = callback_ref!(data,T);
-    let text = unsafe { CStr::from_ptr(text).to_str().expect("log text was not UTF-8")  };
+    let text = CStr::from_ptr(text).to_str().expect("log text was not UTF-8");
     if let Some(ref callback) = this.log_callback {
         callback(&mut this.data, level as u32, text);
     }
