@@ -4,6 +4,7 @@ fn main() {
     bundled::main();
 }
 
+const MOSQUITTO_GIT_URL: &str = "https://github.com/eclipse/mosquitto.git";
 const MOSQUITTO_VERSION: &str = "2.0.4";
 
 #[cfg(feature = "build_bindgen")]
@@ -63,14 +64,30 @@ mod bundled {
     use super::*;
     use std::path::Path;
     use std::process;
+    use std::env;
 
     extern crate cmake;
 
     pub fn main() {
         println!("Running the bundled build");
 
-        if let Err(e) = Command::new("git").args(&["submodule", "update", "--init"]).status() {
-            println!("failed to update the git submodule: {:?}", e);
+        let args = vec![
+            "clone".to_string(),
+            env::var("MOSQUITTO_GIT_URL").unwrap_or(MOSQUITTO_GIT_URL.to_string()),
+            "--depth=1".to_string()
+        ];
+
+        if let Err(e) = Command::new("git").args(&args).status() {
+            panic!("failed to clone the git repo: {:?}", e);
+        }
+
+        if let Ok(hash) = env::var("MOSQUITTO_GIT_HASH") {
+            if let Err(e) = Command::new("git").args(&["fetch", "--depth", "1", "origin", hash.as_str()]).status() {
+                panic!("failed to fetch the git hash: {:?}", e);
+            }
+            if let Err(e) = Command::new("git").args(&["checkout", hash.as_str()]).status() {
+                panic!("failed to checkout the git hash: {:?}", e);
+            }
         }
 
         let mut cmk_cfg = cmake::Config::new("mosquitto");
