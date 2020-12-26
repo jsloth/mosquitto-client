@@ -13,7 +13,7 @@ The Mosquitto client is thread-safe, so you can publish from one thread and list
 for the messages on another. This example demonstrates **mosquitto-client** usage:
 
 ```rust
-extern crate mosquitto_client as mosq;
+extern crate mosquitto_client_wrapper as mosq;
 use mosq::Mosquitto;
 use std::{thread, time};
 

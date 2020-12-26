@@ -1,4 +1,4 @@
-extern crate mosquitto_client as mosq;
+extern crate mosquitto_client_wrapper as mosq;
 use mosq::Mosquitto;
 use std::time::{Instant,Duration};
 
