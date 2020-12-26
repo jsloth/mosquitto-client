@@ -1,11 +1,14 @@
 [package]
-name = "mosquitto-client"
-version = "0.1.5"
+name = "mosquitto-client-wrapper"
+version = "0.1.6"
 authors = ["Steve Donovan <steve.j.donovan@google.com>"]
 
-description = "Rust interface to the Mosquitto MQTT broker client"
-documentation = "https://docs.rs/mosquitto-client"
-repository = "https://github.com/stevedonovan/mosquitto-client.git"
+description = """
+    Rust interface to the Mosquitto MQTT broker client.
+    This is a fork of https://github.com/jsloth/mosquitto-client.
+"""
+documentation = "https://docs.rs/mosquitto-client-wrapper"
+repository = "https://github.com/ce-rust/mosquitto-client-wrapper.git"
 readme = "readme.md"
 license="MIT"
 
