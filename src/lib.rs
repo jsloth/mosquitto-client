@@ -110,14 +110,14 @@
 //! # }
 //! ```
 //!
-use std::os::raw::{c_int,c_char};
+use std::os::raw::{c_int, c_char, c_uint, c_void};
 use std::ffi::{CStr,CString};
 use std::error;
 use std::fmt;
 use std::path::Path;
 use std::time::{Duration,Instant};
 use std::fmt::{Display,Debug};
-use std::ptr::null;
+use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static INSTANCES: AtomicUsize = AtomicUsize::new(0);
@@ -224,7 +224,7 @@ impl MosqMessage {
         let msg = self.msg_ref();
         unsafe {
             ::std::slice::from_raw_parts(
-                msg.payload,
+                &mut *(msg.payload as *mut u8),
                 msg.payloadlen as usize
             )
         }
@@ -246,7 +246,7 @@ impl MosqMessage {
     /// True if we received this as a retained message.
     /// Subsequent messages marked as retained will not set this.
     pub fn retained(&self) -> bool {
-        if self.msg_ref().retain > 0 {true} else {false}
+        self.msg_ref().retain
     }
 }
 
@@ -268,7 +268,7 @@ impl Drop for MosqMessage {
     fn drop(&mut self) {
         // eprintln!("dropping {}",self.owned);
         if self.owned {
-            unsafe { mosquitto_message_free(&self.msg) };
+            unsafe { mosquitto_message_free(&mut (self.msg as *mut _)) };
         }
     }
 }
@@ -289,11 +289,11 @@ impl <'a>TopicMatcher<'a> {
 
     /// true if a message matches a subscription topic
     pub fn matches(&self, msg: &MosqMessage) -> bool {
-        let mut matched: u8 = 0;
+        let mut matched = false;
         unsafe {
              mosquitto_topic_matches_sub(self.sub.as_ptr(),msg.msg_ref().topic, &mut matched);
         }
-        if matched > 0 {true} else {false}
+        matched
     }
 
     fn receive(&self, millis: i32, just_one: bool) -> Result<Vec<MosqMessage>> {
@@ -362,7 +362,7 @@ pub fn version() -> Version {
 
 /// Mosquitto client
 pub struct Mosquitto {
-    mosq: *const Mosq,
+    mosq: *mut Mosq,
     owned: bool,
 }
 
@@ -382,7 +382,7 @@ impl Mosquitto {
             unsafe { mosquitto_lib_init(); }
         }
         let mosq = unsafe {
-            mosquitto_new(cs(id).as_ptr(),if clean_session {1} else {0},null())
+            mosquitto_new(cs(id).as_ptr(), clean_session, null_mut())
         };
         Mosquitto{
             mosq: mosq,
@@ -428,7 +428,7 @@ impl Mosquitto {
 
     /// call if you wish to use Mosquitto in a multithreaded environment.
     pub fn threaded(&self) {
-        unsafe { mosquitto_threaded_set(self.mosq,1); }
+        unsafe { mosquitto_threaded_set(self.mosq, true); }
     }
 
     /// reconnect to the broker
@@ -441,9 +441,9 @@ impl Mosquitto {
     pub fn reconnect_delay_set(&self,delay: u32, delay_max: u32, exponential_backoff: bool) -> Result<()> {
         Error::result("delay_set",unsafe {
             mosquitto_reconnect_delay_set(self.mosq,
-                delay as c_int,
-                delay_max as c_int,
-                exponential_backoff as u8
+                delay as c_uint,
+                delay_max as c_uint,
+                exponential_backoff
         )})
 
     }
@@ -483,8 +483,8 @@ impl Mosquitto {
 
         let rc = unsafe { mosquitto_publish(
             self.mosq,&mut mid, cs(topic).as_ptr(),
-            payload.len() as c_int,payload.as_ptr(),
-            qos as c_int, if retain {1} else {0}
+            payload.len() as c_int, payload.as_ptr() as *mut c_void,
+            qos as c_int, retain
         )};
 
         if rc == 0 {
@@ -497,8 +497,8 @@ impl Mosquitto {
     pub fn will_set(&self, topic: &str, payload: &[u8], qos: u32, retain: bool) -> Result<()> {
         Error::result("will_set",unsafe { mosquitto_will_set(
             self.mosq, cs(topic).as_ptr(),
-            payload.len() as c_int,payload.as_ptr(),
-            qos as c_int, if retain {1} else {0}
+            payload.len() as c_int,payload.as_ptr() as *mut c_void,
+            qos as c_int, retain
         )})
     }
 
@@ -617,7 +617,7 @@ static mut PASSWORD_SIZE: usize = 0;
 
 use std::ptr;
 
-extern fn mosq_password_callback(buf: *mut c_char, _size: c_int, _rwflag: c_int, _userdata: *mut Data)->c_int {
+unsafe extern "C" fn mosq_password_callback(buf: *mut c_char, _size: c_int, _rwflag: c_int, _userdata: *mut Data)->c_int {
     unsafe {
         ptr::copy(PASSWORD_PTR, buf, PASSWORD_SIZE+1);
         PASSWORD_SIZE as c_int
@@ -696,9 +696,9 @@ impl <'a,T> Callbacks<'a,T> {
     fn initialize(&mut self) {
         if ! self.init {
             self.init = true;
-            let pdata: *const Callbacks<T> = &*self;
+            let mut pdata: *const Callbacks<T> = &*self;
             unsafe {
-                mosquitto_user_data_set(self.mosq.mosq, pdata as *const Data);
+                mosquitto_user_data_set(self.mosq.mosq, pdata as *mut Data);
             };
         }
     }
@@ -707,7 +707,7 @@ impl <'a,T> Callbacks<'a,T> {
     /// You are passed a mutable reference to data and the message
     pub fn on_message<C: Fn(&mut T,MosqMessage) + 'a>(&mut self, callback: C) {
         self.initialize();
-        unsafe {mosquitto_message_callback_set(self.mosq.mosq,mosq_message_callback::<T>);}
+        unsafe {mosquitto_message_callback_set(self.mosq.mosq,Some(mosq_message_callback::<T>));}
         self.message_callback = Some(Box::new(callback));
     }
 
@@ -715,7 +715,7 @@ impl <'a,T> Callbacks<'a,T> {
     /// You are passed a mutable reference to data and the status.
     pub fn on_connect<C: Fn(&mut T,i32) + 'a>(&mut self, callback: C) {
         self.initialize();
-        unsafe {mosquitto_connect_callback_set(self.mosq.mosq,mosq_connect_callback::<T>);}
+        unsafe {mosquitto_connect_callback_set(self.mosq.mosq,Some(mosq_connect_callback::<T>));}
         self.connect_callback = Some(Box::new(callback));
     }
 
@@ -723,7 +723,7 @@ impl <'a,T> Callbacks<'a,T> {
     /// You are passed a mutable reference to data and the message id.
     pub fn on_publish<C: Fn(&mut T,i32) + 'a>(&mut self, callback: C) {
         self.initialize();
-        unsafe {mosquitto_publish_callback_set(self.mosq.mosq,mosq_publish_callback::<T>);}
+        unsafe {mosquitto_publish_callback_set(self.mosq.mosq,Some(mosq_publish_callback::<T>));}
         self.publish_callback = Some(Box::new(callback));
     }
 
@@ -731,7 +731,7 @@ impl <'a,T> Callbacks<'a,T> {
     /// You are passed a mutable reference to data and the subscription id.
     pub fn on_subscribe<C: Fn(&mut T,i32) + 'a>(&mut self, callback: C) {
         self.initialize();
-        unsafe {mosquitto_subscribe_callback_set(self.mosq.mosq,mosq_subscribe_callback::<T>);}
+        unsafe {mosquitto_subscribe_callback_set(self.mosq.mosq,Some(mosq_subscribe_callback::<T>));}
         self.subscribe_callback = Some(Box::new(callback));
     }
 
@@ -739,7 +739,7 @@ impl <'a,T> Callbacks<'a,T> {
     /// You are passed a mutable reference to data and the subscription id.
     pub fn on_unsubscribe<C: Fn(&mut T,i32) + 'a>(&mut self, callback: C) {
         self.initialize();
-        unsafe {mosquitto_unsubscribe_callback_set(self.mosq.mosq,mosq_unsubscribe_callback::<T>);}
+        unsafe {mosquitto_unsubscribe_callback_set(self.mosq.mosq,Some(mosq_unsubscribe_callback::<T>));}
         self.unsubscribe_callback = Some(Box::new(callback));
     }
 
@@ -747,7 +747,7 @@ impl <'a,T> Callbacks<'a,T> {
     /// You are passed a mutable reference to data and ....
     pub fn on_disconnect<C: Fn(&mut T,i32) + 'a>(&mut self, callback: C) {
         self.initialize();
-        unsafe {mosquitto_disconnect_callback_set(self.mosq.mosq,mosq_disconnect_callback::<T>);}
+        unsafe {mosquitto_disconnect_callback_set(self.mosq.mosq,Some(mosq_disconnect_callback::<T>));}
         self.disconnect_callback = Some(Box::new(callback));
     }
 
@@ -756,7 +756,7 @@ impl <'a,T> Callbacks<'a,T> {
     /// and the text of the log message
     pub fn on_log<C: Fn(&mut T,u32,&str) + 'a>(&mut self, callback: C) {
         self.initialize();
-        unsafe {mosquitto_log_callback_set(self.mosq.mosq,mosq_log_callback::<T>);}
+        unsafe {mosquitto_log_callback_set(self.mosq.mosq,Some(mosq_log_callback::<T>));}
         self.log_callback = Some(Box::new(callback));
     }
 
@@ -765,7 +765,7 @@ impl <'a,T> Callbacks<'a,T> {
 impl <'a,T>Drop for Callbacks<'a,T> {
     fn drop(&mut self) {
         unsafe {
-            mosquitto_user_data_set(self.mosq.mosq, null() as *const Data);
+            mosquitto_user_data_set(self.mosq.mosq, null_mut() as *mut Data);
         }
     }
 }
@@ -779,7 +779,7 @@ macro_rules! callback_ref {
     }
 }
 
-extern fn mosq_connect_callback<T>(_: *const Mosq, data: *mut Data, rc: c_int) {
+unsafe extern "C" fn mosq_connect_callback<T>(_: *mut Mosq, data: *mut Data, rc: c_int) {
     if data.is_null() { return; }
     let this = callback_ref!(data,T);
     if let Some(ref callback) = this.connect_callback {
@@ -787,7 +787,7 @@ extern fn mosq_connect_callback<T>(_: *const Mosq, data: *mut Data, rc: c_int) {
     }
 }
 
-extern fn mosq_publish_callback<T>(_: *const Mosq, data: *mut Data, rc: c_int) {
+unsafe extern "C" fn mosq_publish_callback<T>(_: *mut Mosq, data: *mut Data, rc: c_int) {
     if data.is_null() { return; }
     let this = callback_ref!(data,T);
     if let Some(ref callback) = this.publish_callback {
@@ -795,16 +795,16 @@ extern fn mosq_publish_callback<T>(_: *const Mosq, data: *mut Data, rc: c_int) {
     }
 }
 
-extern fn mosq_message_callback<T>(_: *const Mosq, data: *mut Data, message: *const Message) {
+unsafe extern "C" fn mosq_message_callback<T>(_: *mut Mosq, data: *mut Data, message: *const Message) {
     if data.is_null() { return; }
     let this = callback_ref!(data,T);
     //println!("msg {:?}", unsafe {&*message});
     if let Some(ref callback) = this.message_callback {
-        callback(&mut this.data, MosqMessage::new(message,false));
+        callback(&mut this.data, MosqMessage::new(message.clone(),false));
     }
 }
 
-extern fn mosq_subscribe_callback<T>(_: *const Mosq, data: *mut Data, rc: c_int) {
+unsafe extern "C" fn mosq_subscribe_callback<T>(_: *mut Mosq, data: *mut Data, rc: c_int, qos_count: i32, granted_qos: *const c_int) {
     if data.is_null() { return; }
     let this = callback_ref!(data,T);
     if let Some(ref callback) = this.subscribe_callback {
@@ -812,7 +812,7 @@ extern fn mosq_subscribe_callback<T>(_: *const Mosq, data: *mut Data, rc: c_int)
     }
 }
 
-extern fn mosq_unsubscribe_callback<T>(_: *const Mosq, data: *mut Data, rc: c_int) {
+unsafe extern "C" fn mosq_unsubscribe_callback<T>(_: *mut Mosq, data: *mut Data, rc: c_int) {
     if data.is_null() { return; }
     let this = callback_ref!(data,T);
     if let Some(ref callback) = this.unsubscribe_callback {
@@ -820,7 +820,7 @@ extern fn mosq_unsubscribe_callback<T>(_: *const Mosq, data: *mut Data, rc: c_in
     }
 }
 
-extern fn mosq_disconnect_callback<T>(_: *const Mosq, data: *mut Data, rc: c_int) {
+unsafe extern "C" fn mosq_disconnect_callback<T>(_: *mut Mosq, data: *mut Data, rc: c_int) {
     if data.is_null() { return; }
     let this = callback_ref!(data,T);
     if let Some(ref callback) = this.disconnect_callback {
@@ -828,7 +828,7 @@ extern fn mosq_disconnect_callback<T>(_: *const Mosq, data: *mut Data, rc: c_int
     }
 }
 
-extern fn mosq_log_callback<T>(_: *const Mosq, data: *mut Data, level: c_int, text: *const c_char) {
+unsafe extern "C" fn mosq_log_callback<T>(_: *mut Mosq, data: *mut Data, level: c_int, text: *const c_char) {
     if data.is_null() { return; }
     let this = callback_ref!(data,T);
     let text = unsafe { CStr::from_ptr(text).to_str().expect("log text was not UTF-8")  };
