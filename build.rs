@@ -68,11 +68,19 @@ mod bundled {
 
     pub fn main() {
         println!("Running the bundled build");
+
         if let Err(e) = Command::new("git").args(&["submodule", "update", "--init"]).status() {
             println!("failed to update the git submodule: {:?}", e);
         }
 
         let mut cmk_cfg = cmake::Config::new("mosquitto");
+        cmk_cfg.define("WITH_BUNDLED_DEPS", "ON");
+        cmk_cfg.define("WITH_EC", "OFF");
+        cmk_cfg.define("WITH_TLS", "OFF");
+        cmk_cfg.define("WITH_TLS_PSK", "OFF");
+        cmk_cfg.define("WITH_APPS", "OFF");
+        cmk_cfg.define("WITH_PLUGINS", "OFF");
+        cmk_cfg.define("DOCUMENTATION", "OFF");
         let cmk = cmk_cfg.build();
 
         let lib_path = if cmk.join("lib").exists() {
