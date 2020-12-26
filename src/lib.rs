@@ -11,7 +11,7 @@
 //!
 //! ```rust
 //! # fn run() -> std::result::Result<(),Box<dyn std::error::Error>> {
-//! let m = mosquitto_client::Mosquitto::new("test");
+//! let m = mosquitto_client_wrapper::Mosquitto::new("test");
 //!
 //! m.connect("localhost",1883,5)?;
 //!
@@ -41,7 +41,7 @@
 //!
 //! ```rust,no_run
 //! # fn run() -> std::result::Result<(),Box<dyn std::error::Error>> {
-//! let m = mosquitto_client::Mosquitto::new("test");
+//! let m = mosquitto_client_wrapper::Mosquitto::new("test");
 //!
 //! m.connect("localhost",1883,5)?;
 //! let bonzo = m.subscribe("bonzo/#",0)?;
@@ -79,7 +79,7 @@
 //! # fn run() -> std::result::Result<(),Box<dyn std::error::Error>> {
 //! use std::{thread,time};
 //!
-//! let m = mosquitto_client::Mosquitto::new("test");
+//! let m = mosquitto_client_wrapper::Mosquitto::new("test");
 //!
 //! m.connect("localhost",1883,10)?;
 //! m.subscribe("bilbo/#",1)?;
